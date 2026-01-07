@@ -1,56 +1,31 @@
-# Multi-stage build for Polymarket Copy Trading Bot
-
-# Stage 1: Build
+# ---------- Builder ----------
 FROM node:20-alpine AS builder
-
 WORKDIR /app
 
-# Copy package files
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies
+# install deps (incluye dev) + build
 RUN npm install
 
-# Copy source code
-COPY src ./src
+# copia el código (necesario para build y/o postinstall)
+COPY . .
 
-# Build TypeScript
-RUN npm run build
+# compila TypeScript si existe script build
+RUN npm run build || true
 
-# Stage 2: Production
+# elimina devDependencies sin volver a ejecutar install
+RUN npm prune --omit=dev
+
+# ---------- Runtime ----------
 FROM node:20-alpine
-
 WORKDIR /app
 
-# Install dumb-init for proper signal handling
 RUN apk add --no-cache dumb-init
 
-# Copy package files
-COPY package*.json ./
-
-# Install production dependencies only
-RUN npm install --omit=dev && npm cache clean --force
-
-# Copy built files from builder
+# copia lo necesario desde builder
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-# Change ownership
-RUN chown -R nodejs:nodejs /app
-
-# Switch to non-root user
-USER nodejs
-
-# Expose port (if needed for health checks in future)
-EXPOSE 3000
-
-# Use dumb-init to handle signals properly
-ENTRYPOINT ["dumb-init", "--"]
-
-# Start the application
-CMD ["node", "dist/index.js"]
-
+CMD ["dumb-init", "node", "dist/index.js"]
